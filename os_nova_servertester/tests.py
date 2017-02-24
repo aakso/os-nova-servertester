@@ -1,16 +1,15 @@
 from __future__ import print_function, unicode_literals
 
+import datetime as dt
 import logging
-import six
 import sys
 import time
 
-from novaclient.client import Client
+import six
 from keystoneauth1.session import Session
-from uuid import UUID
-import datetime as dt
+from novaclient.client import Client
 
-from os_nova_servertester.errors import TimeOut, TesterError
+from os_nova_servertester.errors import TesterError, TimeOut
 from os_nova_servertester.server import shim
 from os_nova_servertester.server.cloudconfig import CloudConfigGenerator
 
@@ -53,7 +52,7 @@ class TestWorkFlow(object):
                 LOG.info('%s: completed: %s (%s)', self.__class__.__name__,
                          func.__name__, func.__doc__)
                 if self.current_state is None:
-                    #self.cleanup()
+                    self.cleanup()
                     LOG.info('%s: workflow completed', self.__class__.__name__)
                     break
             except StopWorkFlow:
