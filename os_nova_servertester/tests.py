@@ -2,6 +2,7 @@ from __future__ import print_function, unicode_literals
 
 import datetime as dt
 import logging
+import os
 import sys
 import time
 
@@ -58,7 +59,7 @@ class TestWorkFlow(object):
             except StopWorkFlow:
                 LOG.info('%s: workflow stopped', self.__class__.__name__)
                 break
-            except Exception, KeyboardInterrupt:
+            except (Exception, KeyboardInterrupt):
                 LOG.error('%s: workflow failed', self.__class__.__name__)
                 self.cleanup()
                 six.reraise(*sys.exc_info())
@@ -87,6 +88,7 @@ class SimpleTest(TestWorkFlow):
                  build_timeout=120,
                  callhome_timeout=300,
                  test_script=None,
+                 console_logs=None,
                  **kwargs):
         super(SimpleTest, self).__init__(**kwargs)
         self.client = Client(
@@ -100,6 +102,12 @@ class SimpleTest(TestWorkFlow):
         self.build_timeout = build_timeout
         self.callhome_timeout = callhome_timeout
         self.test_script = test_script
+        if console_logs is not None:
+            self.console_logs = os.path.abspath(console_logs)
+        else:
+            self.console_logs = None
+
+        LOG.info(self.console_logs)
 
         self.servers = []
         self.userdata = None
@@ -158,7 +166,21 @@ class SimpleTest(TestWorkFlow):
             for server in servers:
                 self.client.servers.delete(server)
 
+        def save_logs():
+            if self.console_logs is None:
+                return
+            for server in servers:
+                try:
+                    log = server.get_console_output()
+                    name = "console-output-{}.txt".format(server.id)
+                    with open(os.path.join(self.console_logs, name), 'w') as f:
+                        f.write(log)
+                except Exception as e:
+                    LOG.error("error while saving logs: %s", e)
+                    pass
+
         self.add_rollback(delete_servers)
+        self.add_rollback(save_logs)
         self.next_state(self.state_wait_for_active)
 
     def state_wait_for_active(self):

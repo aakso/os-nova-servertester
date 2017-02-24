@@ -33,6 +33,10 @@ def main():
         metavar='FILE',
         help='Optional test script to deploy to server(s). Must return exit status 0 for ok')
     parser.add_argument(
+        '--console-logs',
+        metavar='PATH',
+        help='Save console logs to this dir')
+    parser.add_argument(
         '--availability-zone', metavar='NAME', help='Availability zone to use')
     parser.add_argument(
         '--count',
@@ -55,7 +59,8 @@ def main():
             count=args.count,
             network=args.network,
             az=args.availability_zone,
-            test_script=args.test_script).begin()
+            test_script=args.test_script,
+            console_logs=args.console_logs).begin()
     except TesterError as e:
         print('ERROR: {}'.format(e), file=sys.stderr)
         return 1
