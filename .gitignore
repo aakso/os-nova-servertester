@@ -4,4 +4,4 @@
 *~
 build
 dist
-os_imagetool.egg-info
+*.egg-info

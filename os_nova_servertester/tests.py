@@ -159,7 +159,7 @@ class SimpleTest(TestWorkFlow):
                     userdata=self.userdata,
                     meta={self.TEST_STATUS_KEY: self.TEST_STATUS_PENDING},
                     availability_zone=self.az, ))
-        LOG.info("Created servers: %s", servers)
+        LOG.info("Created servers: %s", ' '.join(x.id for x in servers))
         self.servers = servers[:]
 
         def delete_servers():
