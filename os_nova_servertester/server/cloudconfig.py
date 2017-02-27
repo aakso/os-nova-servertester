@@ -7,6 +7,7 @@ class CloudConfigGenerator(object):
     def __init__(self):
         self.write_files = []
         self.runcmd = []
+        self.packages = []
 
     def add_write_file(self, path, content_or_file, mode='0640'):
         if hasattr(content_or_file, 'read'):
@@ -25,8 +26,12 @@ class CloudConfigGenerator(object):
     def add_runcmd(self, *cmd):
         self.runcmd.append(cmd)
 
+    def add_package(self, *pkgs):
+        self.packages.extend(pkgs)
+
     def generate(self):
         return "#cloud-config\n" + yaml.safe_dump(dict(
+            packages=self.packages,
             write_files=self.write_files,
             runcmd=self.runcmd,
         ))

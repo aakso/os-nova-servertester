@@ -106,9 +106,6 @@ class SimpleTest(TestWorkFlow):
             self.console_logs = os.path.abspath(console_logs)
         else:
             self.console_logs = None
-
-        LOG.info(self.console_logs)
-
         self.servers = []
         self.userdata = None
         self.next_state(self.state_prepare)
@@ -132,6 +129,8 @@ class SimpleTest(TestWorkFlow):
             self.TEST_STATUS_COMPLETE, self.TEST_STATUS_ERROR,
             self.TEST_STATUS_EXITCODE_KEY)
         cconfig = CloudConfigGenerator()
+        # Ensure curl is installed
+        cconfig.add_package('curl')
         cconfig.add_write_file(self.TEST_SHIM, shimscript, mode='0750')
         if self.test_script:
             with open(self.test_script) as f:
@@ -143,6 +142,26 @@ class SimpleTest(TestWorkFlow):
     def state_create_servers(self):
         '''Creates test servers according to configuration'''
         servers = []
+
+        def save_logs():
+            if self.console_logs is None:
+                return
+            for server in servers:
+                try:
+                    log = server.get_console_output()
+                    name = "console-output-{}.txt".format(server.id)
+                    with open(os.path.join(self.console_logs, name), 'w') as f:
+                        f.write(log)
+                except Exception as e:
+                    LOG.error("error while saving logs: %s", e)
+                    pass
+
+        def delete_servers():
+            for server in servers:
+                self.client.servers.delete(server)
+
+        self.add_rollback(delete_servers)
+
         if self.network is not None and self.network != 'auto':
             nics = [{'net-id': self.network.id}]
         else:
@@ -161,25 +180,6 @@ class SimpleTest(TestWorkFlow):
                     availability_zone=self.az, ))
         LOG.info("Created servers: %s", ' '.join(x.id for x in servers))
         self.servers = servers[:]
-
-        def delete_servers():
-            for server in servers:
-                self.client.servers.delete(server)
-
-        def save_logs():
-            if self.console_logs is None:
-                return
-            for server in servers:
-                try:
-                    log = server.get_console_output()
-                    name = "console-output-{}.txt".format(server.id)
-                    with open(os.path.join(self.console_logs, name), 'w') as f:
-                        f.write(log)
-                except Exception as e:
-                    LOG.error("error while saving logs: %s", e)
-                    pass
-
-        self.add_rollback(delete_servers)
         self.add_rollback(save_logs)
         self.next_state(self.state_wait_for_active)
 
@@ -203,6 +203,8 @@ class SimpleTest(TestWorkFlow):
         start = dt.datetime.now()
         while wait_servers:
             if (dt.datetime.now() - start).seconds > self.callhome_timeout:
+                LOG.error("Timed out while waiting for servers: %s",
+                          ', '.join(x.id for x in wait_servers))
                 raise TimeOut(
                     'Timed out while waiting for servers to call home')
             server = self.client.servers.get(wait_servers.pop(0))

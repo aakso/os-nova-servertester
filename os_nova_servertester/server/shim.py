@@ -13,14 +13,15 @@ METADATA_VALUE_OK=${METADATA_VALUE_OK}
 METADATA_VALUE_ERR=${METADATA_VALUE_ERR}
 METADATA_EXITCODE_KEY=${METADATA_EXITCODE_KEY}
 
-INSTANCE_ID=$(cat /var/lib/cloud/data/instance-id)
+INSTANCE_ID=$(curl -s http://169.254.169.254/openstack/latest/meta_data.json | python -c 'import sys,json; print json.load(sys.stdin)["uuid"]')
 
 function set_metadata() {
 	key=$1
 	val=$2
-	echo "Reporting: $key -> $val"
-	/usr/bin/curl -f -X POST \
-		$NOVA_ENDPOINT/servers/$INSTANCE_ID/metadata \
+	url="$NOVA_ENDPOINT/servers/$INSTANCE_ID/metadata"
+	echo "Reporting: $key -> $val to $url"
+	/usr/bin/curl -s -f -X POST \
+		$url \
 		-H "User-Agent: os-nova-servertester" \
 		-H "Content-Type: application/json" \
 		-H "Accept: application/json" \
