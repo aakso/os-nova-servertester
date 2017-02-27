@@ -13,7 +13,7 @@ METADATA_VALUE_OK=${METADATA_VALUE_OK}
 METADATA_VALUE_ERR=${METADATA_VALUE_ERR}
 METADATA_EXITCODE_KEY=${METADATA_EXITCODE_KEY}
 
-INSTANCE_ID=$(curl -s http://169.254.169.254/openstack/latest/meta_data.json | python -c 'import sys,json; print json.load(sys.stdin)["uuid"]')
+INSTANCE_ID=$(curl -s http://169.254.169.254/openstack/latest/meta_data.json | $(which python || which python3) -c 'import sys,json; sys.stdout.write(json.load(sys.stdin)["uuid"])')
 
 function set_metadata() {
 	key=$1
