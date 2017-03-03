@@ -20,13 +20,11 @@ def main():
         description='Tool to test Nova server provisioning')
     parser.add_argument(
         '--image-id',
-        required=True,
         metavar='UUID',
         default=os.environ.get('TEST_IMAGE_ID'),
         help='Image to test with')
     parser.add_argument(
         '--flavor',
-        required=True,
         metavar='NAME_OR_UUID',
         default=os.environ.get('TEST_FLAVOR'),
         help='Flavor name or uuid to test with')
@@ -74,7 +72,11 @@ def main():
 
     args = parser.parse_args()
 
+
     try:
+        if args.flavor is None or args.image_id is None:
+            raise TesterError('flavor and image id are required')
+
         auth = ksloading.cli.load_from_argparse_arguments(args)
         SimpleTest(
             auth,
