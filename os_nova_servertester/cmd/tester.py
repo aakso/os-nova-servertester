@@ -2,16 +2,26 @@ from __future__ import print_function, unicode_literals
 
 import argparse
 import logging
-import sys
 import os
+import signal
+import sys
 
 import keystoneauth1.loading as ksloading
 
-from os_nova_servertester.log import setup_logging, set_debug
 from os_nova_servertester.errors import TesterError
+from os_nova_servertester.log import set_debug, setup_logging
 from os_nova_servertester.tests import SimpleTest
 
 LOG = logging.getLogger('tester')
+
+
+# Treat SIGTERM as interrupt so we can abort this tool 
+# cleanly for example in Jenkins
+def sigterm(s, f):
+    raise KeyboardInterrupt('SIGTERM')
+
+
+signal.signal(signal.SIGTERM, sigterm)
 
 
 def main():
@@ -71,7 +81,6 @@ def main():
     ksloading.session.register_argparse_arguments(parser)
 
     args = parser.parse_args()
-
 
     try:
         if args.flavor is None or args.image_id is None:
