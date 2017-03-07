@@ -222,6 +222,8 @@ class SimpleTest(TestWorkFlow):
             server = self.client.servers.get(wait_servers.pop(0))
             if server.status != 'ACTIVE':
                 wait_servers.append(server)
+            if server.status == 'ERROR':
+                raise TesterError('server in ERROR status: {}'.format(server.fault))
             time.sleep(1)
         self.next_state(self.state_wait_for_callhome_events)
 
