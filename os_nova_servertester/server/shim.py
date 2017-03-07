@@ -1,9 +1,12 @@
 from __future__ import print_function, unicode_literals
+
+import base64
 from string import Template
 
-TPL = Template('''
-#!/bin/bash
+from os_nova_servertester.errors import TesterError
 
+
+TPL_BASH = Template('''
 set -e
 SCRIPT=${USER_TEST_SCRIPT}
 OS_AUTH_TOKEN=${OS_AUTH_TOKEN}
@@ -34,8 +37,8 @@ function report() {
 	if [ $code -eq 0 ]; then
 		set_metadata $METADATA_KEY $METADATA_VALUE_OK
 	else
-		set_metadata $METADATA_KEY $METADATA_VALUE_ERR
 		set_metadata $METADATA_EXITCODE_KEY $code
+		set_metadata $METADATA_KEY $METADATA_VALUE_ERR
 	fi
 }
 
@@ -49,14 +52,85 @@ fi
 report 0
 ''')
 
+TPL_PS = Template('''
+$ErrorActionPreference = "Stop"
+filter timestamp {
+    "$(Get-Date -format o) $_"
+}
 
-def get_script(os_auth_token, nova_endpoint, user_test_script, metadata_key,
-               metadata_value_ok, metadata_value_err, metadata_exitcode_key):
-    return TPL.safe_substitute(
+$global:http_timeout = 10
+$testscript = "${test_script_content}"
+
+$env:os_auth_token = "${OS_AUTH_TOKEN}"
+$env:nova_endpoint = "${NOVA_ENDPOINT}"
+$env:metadata_key = "${METADATA_KEY}"
+$env:metadata_value_ok = "${METADATA_VALUE_OK}"
+$env:metadata_value_err = "${METADATA_VALUE_ERR}"
+$env:metadata_exitcode_key = "${METADATA_EXITCODE_KEY}"
+
+$env:instance_id = (Invoke-RestMethod -Uri http://169.254.169.254/openstack/latest/meta_data.json -TimeoutSec $global:http_timeout).uuid
+
+function SetMetadata($key, $val) {
+    $url = "$($env:nova_endpoint)/servers/$($env:instance_id)/metadata"
+    Write-Output "Reporting: $key -> $val to $url" | timestamp
+    $headers = @{
+        'X-Auth-Token' = $env:os_auth_token
+        'Accept' = 'application/json'
+    }
+    $body = @{
+        metadata = @{
+            $key = $val.toString()
+        }
+    } | ConvertTo-Json
+    Invoke-RestMethod -Method POST -Verbose -Uri $url -ContentType 'application/json' -Body $body -Headers $headers -TimeoutSec $global:http_timeout
+}
+
+function Report($code) {
+    if($code -eq 0) {
+        SetMetadata $env:metadata_key $env:metadata_value_ok
+    } else {
+        SetMetadata $env:metadata_exitcode_key $code
+        SetMetadata $env:metadata_key $env:metadata_value_err
+    }
+}
+
+if($testscript -ne "") {
+    $script = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($testscript))
+    Write-Output("Executing user test script") | timestamp
+    Write-Output $script | powershell -noprofile -
+    $code = $LASTEXITCODE
+    if($code -ne 0) {
+        Report $code
+        [System.Environment]::Exit(0)
+    }
+}
+Report 0
+''')
+
+
+def get_script(os_auth_token,
+               nova_endpoint,
+               user_test_script,
+               metadata_key,
+               metadata_value_ok,
+               metadata_value_err,
+               metadata_exitcode_key,
+               test_script_content='',
+               script_type='bash'):
+
+    if script_type == 'bash':
+        tpl = TPL_BASH
+    elif script_type == 'powershell':
+        tpl = TPL_PS
+    else:
+        raise TesterError('invalid template type: {}'.format(script_type))
+
+    return tpl.safe_substitute(
         OS_AUTH_TOKEN=os_auth_token,
         NOVA_ENDPOINT=nova_endpoint,
         USER_TEST_SCRIPT=user_test_script,
         METADATA_KEY=metadata_key,
         METADATA_VALUE_OK=metadata_value_ok,
         METADATA_VALUE_ERR=metadata_value_err,
-        METADATA_EXITCODE_KEY=metadata_exitcode_key)
+        METADATA_EXITCODE_KEY=metadata_exitcode_key,
+        test_script_content=base64.b64encode(test_script_content))

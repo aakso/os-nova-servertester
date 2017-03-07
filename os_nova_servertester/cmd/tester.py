@@ -47,7 +47,8 @@ def main():
         '--test-script',
         metavar='FILE',
         default=os.environ.get('TEST_TEST_SCRIPT'),
-        help='Optional test script to deploy to server(s). Must return exit status 0 for ok')
+        help='Optional test script to deploy to server(s). Must return exit status 0 for ok. ' + \
+             'Must be powershell script if using cloudbase-init')
     parser.add_argument(
         '--console-logs',
         metavar='PATH',
@@ -76,6 +77,16 @@ def main():
         type=int,
         default=os.environ.get('TEST_BUILD_TIMEOUT', 300),
         help='how long to wait for server(s) to start')
+    parser.add_argument(
+        '--shim-type',
+        choices=['bash', 'powershell'],
+        default=os.environ.get('TEST_SHIM_SCRIPT_TYPE', 'bash'),
+        help='What style of shim script to use. You should use powershell if your os is Windows')
+    parser.add_argument(
+        '--cloud-init-type',
+        choices=['cloud-init', 'cloudbase-init'],
+        default=os.environ.get('TEST_CLOUD_INIT_TYPE', 'cloud-init'),
+        help='What style cloud-init to use')
 
     ksloading.register_auth_argparse_arguments(parser, sys.argv)
     ksloading.session.register_argparse_arguments(parser)
@@ -97,7 +108,9 @@ def main():
             test_script=args.test_script,
             console_logs=args.console_logs,
             build_timeout=args.build_timeout,
-            callhome_timeout=args.callhome_timeout).begin()
+            callhome_timeout=args.callhome_timeout,
+            shim_type=args.shim_type,
+            cloud_init_type=args.cloud_init_type).begin()
     except TesterError as e:
         print('ERROR: {}'.format(e), file=sys.stderr)
         return 1

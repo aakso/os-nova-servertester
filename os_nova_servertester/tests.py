@@ -9,6 +9,7 @@ import time
 import six
 from keystoneauth1.session import Session
 from novaclient.client import Client
+from novaclient.exceptions import NotFound as NovaNotFound
 
 from os_nova_servertester.errors import TesterError, TimeOut
 from os_nova_servertester.server import shim
@@ -89,6 +90,8 @@ class SimpleTest(TestWorkFlow):
                  callhome_timeout=300,
                  test_script=None,
                  console_logs=None,
+                 shim_type='bash',
+                 cloud_init_type='cloud-init',
                  **kwargs):
         super(SimpleTest, self).__init__(**kwargs)
         self.client = Client(
@@ -108,6 +111,8 @@ class SimpleTest(TestWorkFlow):
             self.console_logs = None
         self.servers = []
         self.userdata = None
+        self.shim_type = shim_type
+        self.cloud_init_type = cloud_init_type
         self.next_state(self.state_prepare)
 
     def state_prepare(self):
@@ -115,28 +120,51 @@ class SimpleTest(TestWorkFlow):
         self.image = self.client.glance.find_image(self.image)
         LOG.info('Image: %s %s', self.image.id, self.image.name)
         if self.network is not None and self.network != 'auto':
-            self.network = self.client.neutron.find_network(self.network)
-            LOG.info('Network: %s %s', self.network.id, self.network.name)
+            try:
+                self.network = self.client.neutron.find_network(self.network)
+                netname = self.network.name
+            except NovaNotFound:
+                self.network = self.client.networks.get(self.network)
+                netname = self.network.label
+            LOG.info('Network: %s %s', self.network.id, netname)
         self.flavor = self.client.flavors.find(name=self.flavor)
         LOG.info('Flavor: %s %s', self.flavor.id, self.flavor.name)
         self.next_state(self.state_prepare_userdata)
 
     def state_prepare_userdata(self):
         '''Prepare userdata scripts that allow server to report its state'''
+        test_script_content = ''
+        if self.test_script:
+            with open(self.test_script) as f:
+                test_script_content = f.read()
+
         shimscript = shim.get_script(
             self.client.client.get_token(), self.client.client.get_endpoint(),
             self.USER_TEST_SCRIPT, self.TEST_STATUS_KEY,
             self.TEST_STATUS_COMPLETE, self.TEST_STATUS_ERROR,
-            self.TEST_STATUS_EXITCODE_KEY)
-        cconfig = CloudConfigGenerator()
-        # Ensure curl is installed
-        cconfig.add_package('curl')
-        cconfig.add_write_file(self.TEST_SHIM, shimscript, mode='0750')
-        if self.test_script:
-            with open(self.test_script) as f:
-                cconfig.add_write_file(self.USER_TEST_SCRIPT, f, mode='0750')
-        cconfig.add_runcmd('/bin/bash', self.TEST_SHIM)
-        self.userdata = cconfig.generate()
+            self.TEST_STATUS_EXITCODE_KEY, test_script_content=test_script_content,
+            script_type=self.shim_type)
+        if self.cloud_init_type == 'cloud-init':
+            cconfig = CloudConfigGenerator()
+            # Ensure curl is installed
+            cconfig.add_write_file(self.TEST_SHIM, shimscript, mode='0750')
+            if self.test_script:
+                cconfig.add_write_file(self.USER_TEST_SCRIPT, test_script_content, mode='0750')
+            if self.shim_type == 'bash':
+                cconfig.add_package('curl')
+                cconfig.add_runcmd('/bin/bash', self.TEST_SHIM)
+            elif self.shim_type == 'powershell':
+                cconfig.add_runcmd('/usr/bin/env', 'powershell', '-File', self.TEST_SHIM)
+            else:
+                raise TesterError('unsupported shim type: {}'.format(self.shim_type))
+            self.userdata = cconfig.generate()
+        elif self.cloud_init_type == 'cloudbase-init':
+            userdata = []
+            userdata.append('#ps1_sysnative')
+            userdata.append(shimscript)
+            self.userdata = "\n".join(userdata)
+        else:
+            raise TesterError('Unsupported cloud-init type: {}'.format(self.cloud_init_type))
         self.next_state(self.state_create_servers)
 
     def state_create_servers(self):
@@ -216,7 +244,7 @@ class SimpleTest(TestWorkFlow):
                     self.TEST_STATUS_KEY) == self.TEST_STATUS_ERROR:
                 LOG.error("Server %s: error code: %s", server.id,
                           server.metadata.get(self.TEST_STATUS_EXITCODE_KEY))
-                raise TesterError("Server %s reported error", server.id)
+                raise TesterError("Server {} reported error".format(server.id))
 
             else:
                 wait_servers.append(server)
