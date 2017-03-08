@@ -53,12 +53,14 @@ report 0
 ''')
 
 TPL_PS = Template('''
-$ErrorActionPreference = "Stop"
 filter timestamp {
     "$(Get-Date -format o) $_"
 }
 
 $global:http_timeout = 10
+$global:output_log = "c:\output.log"
+$global:serial_device = "COM1"
+
 $testscript = "${test_script_content}"
 
 $env:os_auth_token = "${OS_AUTH_TOKEN}"
@@ -75,7 +77,6 @@ function SetMetadata($key, $val) {
     Write-Output "Reporting: $key -> $val to $url" | timestamp
     $headers = @{
         'X-Auth-Token' = $env:os_auth_token
-        'Accept' = 'application/json'
     }
     $body = @{
         metadata = @{
@@ -94,18 +95,32 @@ function Report($code) {
     }
 }
 
-if($testscript -ne "") {
-    $script = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($testscript))
-    Write-Output("Executing user test script") | timestamp
-    Write-Output $script | powershell -noprofile -
-    $code = $LASTEXITCODE
-    if($code -ne 0) {
-        Report $code
-        [System.Environment]::Exit(0)
+Start-Transcript $global:output_log
+try {
+    if($testscript -ne "") {
+        $script = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($testscript))
+        Write-Output("Executing user test script") | timestamp
+        Write-Output $script | powershell -noprofile -
+        $code = $LASTEXITCODE
+        if($code -ne 0) {
+            Report $code
+            [System.Environment]::Exit(0)
+        }
     }
-}
-Report 0
-''')
+    Report 0
+} catch {
+    $ErrorMessage = $_.Exception.Message
+    $FailedItem = $_.Exception.ItemName
+    Write-Output $_.Exception | Format-List -force
+} Finally {
+    Stop-Transcript
+    if ($global:serial_device -in [System.IO.Ports.SerialPort]::GetPortNames()) {
+        $port = new-Object System.IO.Ports.SerialPort $global:serial_device,9600,None,8,one
+        $port.Open()
+        $port.Write([IO.File]::ReadAllText($global:output_log))
+        $port.Close()
+    }
+}''')
 
 
 def get_script(os_auth_token,
