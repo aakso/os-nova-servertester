@@ -87,6 +87,11 @@ def main():
         choices=['cloud-init', 'cloudbase-init'],
         default=os.environ.get('TEST_CLOUD_INIT_TYPE', 'cloud-init'),
         help='What style cloud-init to use')
+    parser.add_argument(
+        '--no-cleanup-on-error',
+        action='store_true',
+        default=parse_bool(os.environ.get('TEST_NO_CLEANUP_ON_ERROR')),
+        help='Do not delete instances on workflow failure')
 
     ksloading.register_auth_argparse_arguments(parser, sys.argv)
     ksloading.session.register_argparse_arguments(parser)
@@ -110,7 +115,8 @@ def main():
             build_timeout=args.build_timeout,
             callhome_timeout=args.callhome_timeout,
             shim_type=args.shim_type,
-            cloud_init_type=args.cloud_init_type).begin()
+            cloud_init_type=args.cloud_init_type,
+            no_cleanup_on_error=args.no_cleanup_on_error).begin()
     except TesterError as e:
         print('ERROR: {}'.format(e), file=sys.stderr)
         return 1
@@ -118,6 +124,13 @@ def main():
         print('User interrupt')
         return 1
     return 0
+
+
+def parse_bool(val):
+    if val and val.lower() in ['true', 't', '1']:
+        return True
+    else:
+        return False
 
 
 if __name__ == '__main__':

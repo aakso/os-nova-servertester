@@ -23,9 +23,15 @@ class StopWorkFlow(RuntimeError):
 
 
 class TestWorkFlow(object):
+    PENDING = 'pending'
+    FAILED = 'failed'
+    ABORTED = 'aborted'
+    COMPLETE = 'complete'
+
     def __init__(self):
         self.current_state = None
         self.rollback_cbs = []
+        self._outcome = self.PENDING
 
     def next_state(self, nxt):
         self.current_state = nxt
@@ -40,6 +46,15 @@ class TestWorkFlow(object):
         if not callable(cb):
             raise RuntimeError('invalid callback')
         self.rollback_cbs.append(cb)
+
+    @property
+    def outcome(self):
+        return self._outcome
+
+    @outcome.setter
+    def outcome(self, val):
+        if self.outcome == self.PENDING:
+            self._outcome = val
 
     def begin(self):
         while self.current_state:
@@ -60,10 +75,17 @@ class TestWorkFlow(object):
             except StopWorkFlow:
                 LOG.info('%s: workflow stopped', self.__class__.__name__)
                 break
-            except (Exception, KeyboardInterrupt):
-                LOG.error('%s: workflow failed', self.__class__.__name__)
+            except KeyboardInterrupt:
+                LOG.error('%s: workflow aborted', self.__class__.__name__)
+                self.outcome = self.ABORTED
                 self.cleanup()
                 six.reraise(*sys.exc_info())
+            except Exception:
+                LOG.error('%s: workflow failed', self.__class__.__name__)
+                self.outcome = self.FAILED
+                self.cleanup()
+                six.reraise(*sys.exc_info())
+        self.outcome = self.COMPLETE
 
 
 class SimpleTest(TestWorkFlow):
@@ -92,6 +114,7 @@ class SimpleTest(TestWorkFlow):
                  console_logs=None,
                  shim_type='bash',
                  cloud_init_type='cloud-init',
+                 no_cleanup_on_error=False,
                  **kwargs):
         super(SimpleTest, self).__init__(**kwargs)
         self.client = Client(
@@ -113,6 +136,7 @@ class SimpleTest(TestWorkFlow):
         self.userdata = None
         self.shim_type = shim_type
         self.cloud_init_type = cloud_init_type
+        self.no_cleanup_on_error = no_cleanup_on_error
         self.next_state(self.state_prepare)
 
     def state_prepare(self):
@@ -139,24 +163,31 @@ class SimpleTest(TestWorkFlow):
                 test_script_content = f.read()
 
         shimscript = shim.get_script(
-            self.client.client.get_token(), self.client.client.get_endpoint(),
-            self.USER_TEST_SCRIPT, self.TEST_STATUS_KEY,
-            self.TEST_STATUS_COMPLETE, self.TEST_STATUS_ERROR,
-            self.TEST_STATUS_EXITCODE_KEY, test_script_content=test_script_content,
+            self.client.client.get_token(),
+            self.client.client.get_endpoint(),
+            self.USER_TEST_SCRIPT,
+            self.TEST_STATUS_KEY,
+            self.TEST_STATUS_COMPLETE,
+            self.TEST_STATUS_ERROR,
+            self.TEST_STATUS_EXITCODE_KEY,
+            test_script_content=test_script_content,
             script_type=self.shim_type)
         if self.cloud_init_type == 'cloud-init':
             cconfig = CloudConfigGenerator()
             # Ensure curl is installed
             cconfig.add_write_file(self.TEST_SHIM, shimscript, mode='0750')
             if self.test_script:
-                cconfig.add_write_file(self.USER_TEST_SCRIPT, test_script_content, mode='0750')
+                cconfig.add_write_file(
+                    self.USER_TEST_SCRIPT, test_script_content, mode='0750')
             if self.shim_type == 'bash':
                 cconfig.add_package('curl')
                 cconfig.add_runcmd('/bin/bash', self.TEST_SHIM)
             elif self.shim_type == 'powershell':
-                cconfig.add_runcmd('/usr/bin/env', 'powershell', '-File', self.TEST_SHIM)
+                cconfig.add_runcmd('/usr/bin/env', 'powershell', '-File',
+                                   self.TEST_SHIM)
             else:
-                raise TesterError('unsupported shim type: {}'.format(self.shim_type))
+                raise TesterError('unsupported shim type: {}'.format(
+                    self.shim_type))
             self.userdata = cconfig.generate()
         elif self.cloud_init_type == 'cloudbase-init':
             userdata = []
@@ -164,7 +195,8 @@ class SimpleTest(TestWorkFlow):
             userdata.append(shimscript)
             self.userdata = "\n".join(userdata)
         else:
-            raise TesterError('Unsupported cloud-init type: {}'.format(self.cloud_init_type))
+            raise TesterError('Unsupported cloud-init type: {}'.format(
+                self.cloud_init_type))
         self.next_state(self.state_create_servers)
 
     def state_create_servers(self):
@@ -185,6 +217,9 @@ class SimpleTest(TestWorkFlow):
                     pass
 
         def delete_servers():
+            if self.outcome == self.FAILED and self.no_cleanup_on_error:
+                LOG.info("skipping cleanup")
+                return
             for server in servers:
                 self.client.servers.delete(server)
 
@@ -223,7 +258,8 @@ class SimpleTest(TestWorkFlow):
             if server.status != 'ACTIVE':
                 wait_servers.append(server)
             if server.status == 'ERROR':
-                raise TesterError('server in ERROR status: {}'.format(server.fault))
+                raise TesterError('server in ERROR status: {}'.format(
+                    vars(server).get('fault')))
             time.sleep(1)
         self.next_state(self.state_wait_for_callhome_events)
 
